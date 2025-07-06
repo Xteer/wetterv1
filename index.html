@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Wetter App</title>
+  <script src="https://cdn.tailwindcss.com "></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet"/>
+  <style>
+    body {
+      font-family: 'Inter', sans-serif';
+      min-height: max(884px, 100dvh);
+    }
+    .bg-custom-dark {
+      background-color: #1A1A2E;
+    }
+    .text-custom-cyan {
+      color: #00E5FF;
+    }
+    .chart-gradient {
+      background: linear-gradient(to top, rgba(0, 229, 255, 0), rgba(0, 229, 255, 0.3));
+    }
+    .time-label {
+      transform: translateX(-50%);
+    }
+
+    .weather-icon {
+      font-size: 20px;
+      text-anchor: middle;
+      filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+    }
+  </style>
+</head>
+<body class="bg-gray-900 text-white">
+  <div class="max-w-sm mx-auto bg-custom-dark rounded-3xl shadow-lg p-6 min-h-screen">
+    <!-- Suchleiste -->
+    <div class="flex justify-center items-center mt-4">
+      <input id="city-input"
+        class="w-full px-4 py-2 rounded-full bg-gray-800 text-white placeholder-gray-400 focus:outline-none"
+        type="text" placeholder="Ort eingeben..." />
+      <button onclick="getWeather()" class="ml-2 material-icons text-white">search</button>
+    </div>
+
+    <!-- Ort ohne Uhrsymbol -->
+    <div class="mt-4 flex justify-center items-center space-x-2 text-center">
+      <h1 id="city" class="text-4xl font-bold">Lade Wetter...</h1>
+    </div>
+    <p id="country" class="text-gray-400 text-center mt-1"></p>
+
+    <!-- Temperaturanzeige -->
+    <div class="mt-2 text-center">
+      <span id="temp-main" class="text-7xl font-bold text-custom-cyan">--</span>
+      <span class="text-4xl font-light text-custom-cyan">°C</span>
+    </div>
+
+    <!-- Temperaturdiagramm -->
+    <div class="mt-4 relative">
+      <div class="flex justify-center items-end h-40">
+        <div class="w-full h-full relative">
+          <!-- SVG Diagramm -->
+          <svg id="temp-chart" class="absolute bottom-0 w-full h-auto" preserveAspectRatio="none" viewBox="0 0 300 100">
+            <defs>
+              <linearGradient id="gradient" x1="0%" x2="0%" y1="0%" y2="100%">
+                <stop offset="0%" style="stop-color:rgba(0, 229, 255, 0.3)"/>
+                <stop offset="100%" style="stop-color:rgba(0, 229, 255, 0)"/>
+              </linearGradient>
+            </defs>
+            <path id="line-path" d="" fill="url(#gradient)" stroke="#00E5FF" stroke-width="2"/>
+            <g id="weather-icons" class="pointer-events-none"></g>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- Uhrzeit Anzeige unter dem Diagramm -->
+    <div class="mt-1 flex justify-between text-xs text-gray-400 pointer-events-none px-1">
+      <span class="time-label">00</span>
+      <span class="time-label">04</span>
+      <span class="time-label">08</span>
+      <span class="time-label">12</span>
+      <span class="time-label">16</span>
+      <span class="time-label">20</span>
+      <span class="time-label">24</span>
+    </div>
+
+    <!-- Vorhersage -->
+    <div class="mt-4">
+      <h2 class="text-xl font-semibold">3 Tage</h2>
+      <div id="forecast-container" class="bg-gray-800 rounded-lg mt-2 text-sm text-gray-300 p-3 space-y-3"></div>
+    </div>
+  </div>
+
+  <script>
+    function getWeatherIcon(code) {
+      const icons = {
+        0: "☀️", 1: "🌤", 2: "⛅", 3: "☁️",
+        45: "🌫", 48: "🌫", 51: "🌦", 53: "🌧", 55: "🌧",
+        61: "🌧", 71: "❄️", 80: "🌦", 81: "🌧", 85: "❄️",
+        95: "⛈"
+      };
+      return icons[code] || "🌈";
+    }
+
+    function getDayName(dateStr) {
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('de-DE', { weekday: 'long' });
+    }
+
+    async function getWeather() {
+      const city = document.getElementById("city-input").value.trim();
+      if (!city) return alert("Bitte geben Sie einen Ort ein.");
+      try {
+        // Geocoding über OpenStreetMap Nominatim API
+        const geoResponse = await fetch(` https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(city)}&limit=1`);
+        if (!geoResponse.ok) throw new Error("Geocoding-Fehler");
+        const geoData = await geoResponse.json();
+        if (geoData.length === 0) return alert("Ort nicht gefunden");
+        const lat = geoData[0].lat;
+        const lon = geoData[0].lon;
+
+        // Tagesvorhersage von Open-Meteo laden
+        const weatherResponse = await fetch(` https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,weathercode&daily=temperature_2m_max,temperature_2m_min,weathercode&timezone=auto`);
+        if (!weatherResponse.ok) throw new Error("Fehler beim Abrufen der Wetterdaten.");
+        const weatherData = await weatherResponse.json();
+
+        // Aktuelle Temperatur anzeigen
+        const currentTemp = Math.round(weatherData.daily.temperature_2m_max[0]);
+        document.getElementById("city").textContent = city;
+        document.getElementById("country").textContent = "";
+        document.getElementById("temp-main").textContent = currentTemp;
+
+        // Stündliche Daten filtern (nächste 24 Stunden)
+        const hourlyTemps = weatherData.hourly.temperature_2m.slice(0, 24);
+        const hourlyCodes = weatherData.hourly.weathercode.slice(0, 24);
+
+        // Dynamisches Diagramm erstellen
+        drawTemperatureChart(hourlyTemps, hourlyCodes);
+
+        // 3-Tagesvorhersage aktualisieren
+        const forecastContainer = document.getElementById("forecast-container");
+        forecastContainer.innerHTML = "";
+        const daily = weatherData.daily.time.slice(0, 3).map((date, i) => ({
+          day: getDayName(date),
+          date,
+          tempMax: Math.round(weatherData.daily.temperature_2m_max[i]),
+          tempMin: Math.round(weatherData.daily.temperature_2m_min[i]),
+          icon: getWeatherIcon(weatherData.daily.weathercode[i])
+        }));
+        daily.forEach(day => {
+          const item = document.createElement("div");
+          item.className = "flex justify-between items-center bg-gray-700/30 rounded-lg px-3 py-2 hover:bg-gray-700 transition";
+          item.innerHTML = `
+            <div class="flex items-center space-x-3">
+              <span class="text-2xl">${day.icon}</span>
+              <div class="text-left">
+                <div class="font-bold">${day.day}</div>
+                <div class="text-xs text-gray-400">${day.date}</div>
+              </div>
+            </div>
+            <div class="text-right">
+              <div class="text-red-400 font-semibold">↑ ${day.tempMax}°C</div>
+              <div class="text-blue-400 font-semibold">↓ ${day.tempMin}°C</div>
+            </div>
+          `;
+          forecastContainer.appendChild(item);
+        });
+      } catch (error) {
+        console.error("Fehler beim Abrufen der Wetterdaten:", error);
+        alert("Fehler beim Abrufen der Wetterdaten.");
+      }
+    }
+
+    function drawTemperatureChart(temperatures, weatherCodes) {
+      const path = document.getElementById("line-path");
+      const iconsGroup = document.getElementById("weather-icons");
+      iconsGroup.innerHTML = "";
+
+      const width = 300;
+      const height = 100;
+      const xStep = width / (temperatures.length - 1);
+      const maxTemp = Math.max(...temperatures);
+      const minTemp = Math.min(...temperatures);
+      const range = maxTemp - minTemp || 1;
+
+      let d = '';
+      temperatures.forEach((temp, i) => {
+        const x = i * xStep;
+        const y = height - ((temp - minTemp) / range) * height;
+        d += `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
+      });
+      path.setAttribute("d", d + " L 300 100 L 0 100 Z");
+
+      // Wettericons alle 4 Std.
+      const iconIndices = [0, 4, 8, 12, 16, 20];
+      iconIndices.forEach(i => {
+        if (weatherCodes && weatherCodes[i]) {
+          const x = i * xStep;
+          const temp = temperatures[i];
+          const y = height - ((temp - minTemp) / range) * height;
+          const code = weatherCodes[i];
+          const icon = getWeatherIcon(code);
+          iconsGroup.innerHTML += `<text class="weather-icon" x="${x}" y="${y - 5}">${icon}</text>`;
+        }
+      });
+    }
+
+    window.onload = () => {
+      document.getElementById("city-input").value = "Berlin";
+      getWeather();
+    };
+  </script>
+</body>
+</html>
